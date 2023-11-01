@@ -27,7 +27,7 @@ def demo_GM():
     gmix.plot_prob_dist()
     
     
-if __name__ == '__main__':
+def hyperbola_demo():
     model= MdnLinear(1, 256, 2, layers= 2)
     model_op= optim.Adam(model.parameters(), lr=0.0001)
     
@@ -50,9 +50,6 @@ if __name__ == '__main__':
         model_op.step()
         
         epoch_bar.set_description(f"Epoch: {n}, LOSS: {float(loss):.4f}")
-    # finally:
-    #     x= ((torch.rand([1000]) * 2 - 1) * 10).unsqueeze(1)
-    #     y= sample_hyperbola(x) + torch.normal(torch.zeros_like(x), 0.1)
         if n % 100 == 0:
             model_y= gout.sample(1)
             
@@ -66,3 +63,6 @@ if __name__ == '__main__':
             ax.set_ylim([-11, 11])
     
             plt.pause(0.01)
+            
+if __name__ == '__main__':
+    hyperbola_demo()

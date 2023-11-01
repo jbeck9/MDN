@@ -11,6 +11,20 @@ LL_CONST= math.log(math.sqrt(2 * math.pi))
 cat= torch.cat
 
 def choice(w, nsamples):
+    """
+    Pytorch implementation of Numpy's np.random.choice method. Higher speed than
+    the numpy implementation.
+
+    Parameters
+    ----------
+    w : Weights for each choice
+    nsamples : Number of samples
+
+    Returns
+    -------
+    The index of the random choice (for each sample)
+
+    """
     w_tot= torch.zeros(w.shape)
     for n in range(w.shape[1]):
         w_tot[:,n] = w[:,:n+1].sum(dim=-1)
@@ -21,6 +35,27 @@ def choice(w, nsamples):
 
 class MdnLinear(nn.Module):
     def __init__(self, input_size, nhidden, nmix, epsilon= 0.001, drop_rate= 0.0, layers=1):
+        """
+        Adds the MDN Layer. For simple networks such as the hyperbola demo, this can be the entire model.
+        Can also be the last layer of a more complex model.
+
+        Parameters
+        ----------
+        input_size : INT
+            Size of the input
+        nhidden : INT
+            Size of the hidden layers of the network
+        nmix : INT
+            Number of Gaussian mixtures in the model
+        epsilon : FLOAT, optional
+            A small value to add to the variance of each mixture (variance close to zero won't be stable). The default is 0.001.
+        drop_rate : FLOAT, optional
+            Dropout rate The default is 0.0.
+        layers : INT, optional
+            Number of layers for the embedding and each of the three MDN outputs. The default is 1.
+
+        """
+        
         super(MdnLinear, self).__init__()
         
         self.nmix= nmix
@@ -61,6 +96,18 @@ class MdnLinear(nn.Module):
 
 class GaussianMix():
     def __init__(self, inp):
+        """
+        Helper class for interpreting a flattened Gaussian mixture. This class is meant to more or less mimick the functionality of torch.distributions.normal
+        for Gaussian mixtures.
+
+        Parameters
+        ----------
+        inp : torch.Tensor
+            Designed to take the output of the MDNLinear Module, which is flattened to 1 dimension in the forward function of that module.
+            This tensor can be any shape, as long as the last dimension represents the flattened MDN.
+            See demo.py for an example on initilazing this class manually.
+        """
+        
         self.ogshape= list(inp.shape)
         self.bs= inp.flatten(0, -2).shape[0]
         
@@ -115,6 +162,7 @@ class GaussianMix():
     def plot_sample_dist(self, nsamples):
         s= self.sample(nsamples).detach().cpu()
         
+        plt.clf()
         plt.xlabel("Value")
         for n,x in enumerate(s.detach().cpu()):
             sns.kdeplot(x, label= n)
