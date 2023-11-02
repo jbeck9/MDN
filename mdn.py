@@ -10,6 +10,7 @@ import math
 LL_CONST= math.log(math.sqrt(2 * math.pi))
 cat= torch.cat
 
+relu= nn.functional.relu
 def choice(w, nsamples):
     """
     Pytorch implementation of Numpy's np.random.choice method. Higher speed than
@@ -34,7 +35,7 @@ def choice(w, nsamples):
     return (r < w_tot).long().argmax(dim=-1)
 
 class MdnLinear(nn.Module):
-    def __init__(self, input_size, nhidden, nmix, epsilon= 0.001, drop_rate= 0.0, layers=1):
+    def __init__(self, input_size, nhidden, nmix, epsilon= 0.01, drop_rate= 0.0, layers=1):
         """
         Adds the MDN Layer. For simple networks such as the hyperbola demo, this can be the entire model.
         Can also be the last layer of a more complex model.

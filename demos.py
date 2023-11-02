@@ -7,12 +7,10 @@ from mdn import MdnLinear, GaussianMix
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+
 def sample_hyperbola(x, a=1, b=1):
-    
     y_sq= ((x**2/a**2) - 1) * b**2
-    
     sign= (torch.rand(x.shape) > 0.5).float() * 2 - 1
-    
     return torch.sqrt(torch.abs(y_sq)) * sign
 
 def demo_GM():
@@ -36,10 +34,13 @@ def hyperbola_demo():
     model.train()
     for n in epoch_bar:
         
+        # if n == 1500:
+        #     model.epsilon= 0.0001
+        
         model_op.zero_grad()
         
         x= ((torch.rand([256]) * 2 - 1) * 10).unsqueeze(1)
-        y= sample_hyperbola(x) + torch.normal(torch.zeros_like(x), 0.1)
+        y= sample_hyperbola(x) + torch.normal(torch.zeros_like(x), 0.2)
         
         out= model(x)
         gout= GaussianMix(out)
@@ -50,7 +51,7 @@ def hyperbola_demo():
         model_op.step()
         
         epoch_bar.set_description(f"Epoch: {n}, LOSS: {float(loss):.4f}")
-        if n % 100 == 0:
+        if n % 50 == 0:
             model_y= gout.sample(1)
             
             plt.clf()
