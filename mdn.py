@@ -35,7 +35,7 @@ def choice(w, nsamples):
     return (r < w_tot).long().argmax(dim=-1)
 
 class MdnLinear(nn.Module):
-    def __init__(self, input_size, nhidden, nmix, epsilon= 0.01, drop_rate= 0.0, layers=1):
+    def __init__(self, input_size, nhidden, nmix, drop_rate= 0.0, layers=1):
         """
         Adds the MDN Layer. For simple networks such as the hyperbola demo, this can be the entire model.
         Can also be the last layer of a more complex model.
@@ -48,8 +48,6 @@ class MdnLinear(nn.Module):
             Size of the hidden layers of the network
         nmix : INT
             Number of Gaussian mixtures in the model
-        epsilon : FLOAT, optional
-            A small value to add to the variance of each mixture (variance close to zero won't be stable). The default is 0.001.
         drop_rate : FLOAT, optional
             Dropout rate The default is 0.0.
         layers : INT, optional
@@ -60,7 +58,6 @@ class MdnLinear(nn.Module):
         super(MdnLinear, self).__init__()
         
         self.nmix= nmix
-        self.epsilon= epsilon
         
         net= [nn.Linear(input_size, nhidden), nn.LeakyReLU(0.1)]
         for _ in range(layers):
@@ -91,12 +88,12 @@ class MdnLinear(nn.Module):
         
         pi= self.lin_pi(x).unsqueeze(1)
         mean= self.lin_mean(x).unsqueeze(1)
-        var= self.lin_var(x).unsqueeze(1) + self.epsilon
+        var= self.lin_var(x).unsqueeze(1)
         
         return cat([pi, mean, var], dim=1).permute(0,2,1).flatten(1)
 
 class GaussianMix():
-    def __init__(self, inp):
+    def __init__(self, inp, min_var= 1e-2, epsilon= 1e-5):
         """
         Helper class for interpreting a flattened Gaussian mixture. This class is meant to more or less mimick the functionality of torch.distributions.normal
         for Gaussian mixtures.
@@ -107,7 +104,14 @@ class GaussianMix():
             Designed to take the output of the MDNLinear Module, which is flattened to 1 dimension in the forward function of that module.
             This tensor can be any shape, as long as the last dimension represents the flattened MDN.
             See demo.py for an example on initilazing this class manually.
+        min_var : float
+            The minimum variance for any Gaussian in the mixture. Anything less than this is assumed to be effectively zero variance.
+            This is needed for regression problems with low variance. Log probability is an unstable loss function for low variances.
+        epsilon : float
+            The variance value used to produce a Gaussian with "zero variance". epsilon << min_var.
         """
+        
+        self.min_var= min_var
         
         self.ogshape= list(inp.shape)
         self.bs= inp.flatten(0, -2).shape[0]
@@ -119,12 +123,26 @@ class GaussianMix():
         self.mean= i[:,:,1]
         self.var= i[:,:,2]
         
+        self.var[self.var < min_var] = epsilon
+        
         self.device= inp.device
         
     def reshape_output(self, out, feature_size):
         outshape= copy.deepcopy(self.ogshape)
         outshape[-1] = feature_size
         return out.view(outshape)
+    
+    def reshape_mixture(self, target_shape):
+        pi= self.pi
+        mean= self.mean
+        var= self.var
+        
+        if len(target_shape) > 2:
+            pi= pi.unsqueeze(-1).tile([1,1,target_shape[-1]])
+            mean= mean.unsqueeze(-1).tile([1,1,target_shape[-1]])
+            var= var.unsqueeze(-1).tile([1,1,target_shape[-1]])
+            
+        return pi, mean, var
         
     def sample(self, nsamples= 1):
         std= self.var.sqrt()
@@ -146,17 +164,23 @@ class GaussianMix():
         out= (self.pi * self.mean).sum(dim=1)
         return self.reshape_output(out, 1)
     
+    def loss(self, target, var_lambda= 0.1):
+        
+        pi, mean, var= self.reshape_mixture(target.shape)
+        
+        adj_var= torch.clone(var)
+        adj_var[adj_var < self.min_var] = self.min_var
+        
+        log_p_approx = torch.log(pi) -((target - mean) ** 2) / (2 * adj_var) - torch.log(adj_var.sqrt())
+        log_p_approx= torch.logsumexp(log_p_approx, dim=1)
+        
+        return -log_p_approx.mean()
+        
+    
     def log_prob(self, target):
         
-        pi= self.pi
-        mean= self.mean
-        var= self.var
+        pi, mean, var= self.reshape_mixture(target.shape)
         
-        if target.dim() > 2:
-            pi= pi.unsqueeze(-1).tile([1,1,target.shape[-1]])
-            mean= mean.unsqueeze(-1).tile([1,1,target.shape[-1]])
-            var= var.unsqueeze(-1).tile([1,1,target.shape[-1]])
-
         log_probs = torch.log(pi) -((target - mean) ** 2) / (2 * var) - torch.log(var.sqrt()) - LL_CONST
         return torch.logsumexp(log_probs, dim=1)
     

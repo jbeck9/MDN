@@ -34,9 +34,6 @@ def hyperbola_demo():
     model.train()
     for n in epoch_bar:
         
-        # if n == 1500:
-        #     model.epsilon= 0.0001
-        
         model_op.zero_grad()
         
         x= ((torch.rand([256]) * 2 - 1) * 10).unsqueeze(1)
@@ -45,7 +42,8 @@ def hyperbola_demo():
         out= model(x)
         gout= GaussianMix(out)
         
-        loss= -gout.log_prob(y).mean()
+        # loss= -gout.log_prob(y).mean()
+        loss= gout.loss(y)
         loss.backward()
         
         model_op.step()
@@ -67,3 +65,4 @@ def hyperbola_demo():
             
 if __name__ == '__main__':
     hyperbola_demo()
+    # demo_GM()
