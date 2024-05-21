@@ -65,35 +65,23 @@ class MdnLinear(nn.Module):
         net.extend([nn.Linear(nhidden, nhidden)])
         self.embed= nn.Sequential(*net)
         
-        net= [nn.Linear(nhidden, nhidden), nn.LeakyReLU(0.1)]
-        for _ in range(layers):
-            net.extend([nn.Linear(nhidden, nhidden), nn.LeakyReLU(0.1), nn.Dropout(drop_rate)])
-        net.extend([nn.Linear(nhidden, nmix), nn.Softmax(dim=-1)])
-        self.lin_pi= nn.Sequential(*net)
-        
-        net= [nn.Linear(nhidden, nhidden), nn.LeakyReLU(0.1)]
-        for _ in range(layers):
-            net.extend([nn.Linear(nhidden, nhidden), nn.LeakyReLU(0.1), nn.Dropout(drop_rate)])
-        net.extend([nn.Linear(nhidden, nmix)])
-        self.lin_mean= nn.Sequential(*net)
-        
-        net= [nn.Linear(nhidden, nhidden), nn.LeakyReLU(0.1)]
-        for _ in range(layers):
-            net.extend([nn.Linear(nhidden, nhidden), nn.LeakyReLU(0.1), nn.Dropout(drop_rate)])
-        net.extend([nn.Linear(nhidden, nmix), nn.Softplus()])
-        self.lin_var= nn.Sequential(*net)
+        self.lin_pi= nn.Sequential(nn.Linear(nhidden, nmix), nn.Softmax(dim=-1))
+        self.lin_mean= nn.Linear(nhidden, nmix)
+        self.lin_var= nn.Sequential(nn.Linear(nhidden, nmix), nn.Softplus())
         
     def forward(self, x):
         x= self.embed(x)
         
         pi= self.lin_pi(x).unsqueeze(1)
         mean= self.lin_mean(x).unsqueeze(1)
-        var= self.lin_var(x).unsqueeze(1)
+        var= self.lin_var(x).unsqueeze(1) + 1e-6
+        
+        nn.utils.clip_grad_norm_(self.parameters(), 2)
         
         return cat([pi, mean, var], dim=1).permute(0,2,1).flatten(1)
 
 class GaussianMix():
-    def __init__(self, inp, min_var= 1e-2, epsilon= 1e-5):
+    def __init__(self, inp, min_var= 0.001):
         """
         Helper class for interpreting a flattened Gaussian mixture. This class is meant to more or less mimick the functionality of torch.distributions.normal
         for Gaussian mixtures.
@@ -105,10 +93,8 @@ class GaussianMix():
             This tensor can be any shape, as long as the last dimension represents the flattened MDN.
             See demo.py for an example on initilazing this class manually.
         min_var : float
-            The minimum variance for any Gaussian in the mixture. Anything less than this is assumed to be effectively zero variance.
-            This is needed for regression problems with low variance. Log probability is an unstable loss function for low variances.
-        epsilon : float
-            The variance value used to produce a Gaussian with "zero variance". epsilon << min_var.
+            The minimum variance for any Gaussian in the mixture.This is needed for regression problems with low variance. 
+            Log probability is an unstable loss function for low variances.
         """
         
         self.min_var= min_var
@@ -122,8 +108,6 @@ class GaussianMix():
         self.pi= i[:,:,0]
         self.mean= i[:,:,1]
         self.var= i[:,:,2]
-        
-        self.var[self.var < min_var] = epsilon
         
         self.device= inp.device
         
@@ -164,17 +148,20 @@ class GaussianMix():
         out= (self.pi * self.mean).sum(dim=1)
         return self.reshape_output(out, 1)
     
-    def loss(self, target, var_lambda= 0.1):
+    def loss(self, target):
         
         pi, mean, var= self.reshape_mixture(target.shape)
         
         adj_var= torch.clone(var)
         adj_var[adj_var < self.min_var] = self.min_var
         
-        log_p_approx = torch.log(pi) -((target - mean) ** 2) / (2 * adj_var) - torch.log(adj_var.sqrt())
-        log_p_approx= torch.logsumexp(log_p_approx, dim=1)
+        std= adj_var.sqrt()
         
-        return -log_p_approx.mean()
+        log_p_approx = torch.log(pi) -torch.square(target - mean) / (2 * adj_var) - torch.log(std) - LL_CONST
+        loglik= torch.logsumexp(log_p_approx, dim=1)
+        loglik= torch.clamp(loglik, min= -10)
+        
+        return -loglik.mean()
         
     
     def log_prob(self, target):
