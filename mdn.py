@@ -76,8 +76,6 @@ class MdnLinear(nn.Module):
         mean= self.lin_mean(x).unsqueeze(1)
         var= self.lin_var(x).unsqueeze(1) + 1e-6
         
-        nn.utils.clip_grad_norm_(self.parameters(), 2)
-        
         return cat([pi, mean, var], dim=1).permute(0,2,1).flatten(1)
 
 class GaussianMix():
@@ -159,9 +157,8 @@ class GaussianMix():
         
         log_p_approx = torch.log(pi) -torch.square(target - mean) / (2 * adj_var) - torch.log(std) - LL_CONST
         loglik= torch.logsumexp(log_p_approx, dim=1)
-        loglik= torch.clamp(loglik, min= -10)
         
-        return -loglik.mean()
+        return -loglik
         
     
     def log_prob(self, target):
