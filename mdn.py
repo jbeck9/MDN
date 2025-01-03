@@ -26,12 +26,13 @@ def choice(w, nsamples):
     The index of the random choice (for each sample)
 
     """
-    w_tot= torch.zeros(w.shape)
+    device= w.device
+    w_tot= torch.zeros(w.shape, device= device)
     for n in range(w.shape[1]):
         w_tot[:,n] = w[:,:n+1].sum(dim=-1)
         
     w_tot= w_tot.unsqueeze(1).tile([1, nsamples, 1])
-    r= torch.rand([w_tot.shape[0],w_tot.shape[1], 1])
+    r= torch.rand([w_tot.shape[0],w_tot.shape[1], 1], device=device)
     return (r < w_tot).long().argmax(dim=-1)
 
 class MdnLinear(nn.Module):
@@ -129,7 +130,7 @@ class GaussianMix():
     def sample(self, nsamples= 1):
         std= self.var.sqrt()
         
-        ind= choice(self.pi, nsamples).to(self.device)
+        ind= choice(self.pi, nsamples)
         
         m= torch.gather(self.mean, 1, ind)
         s= torch.gather(std, 1, ind)
