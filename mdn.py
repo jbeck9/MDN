@@ -80,7 +80,7 @@ class MdnLinear(nn.Module):
         return cat([pi, mean, var], dim=1).permute(0,2,1).flatten(1)
 
 class GaussianMix():
-    def __init__(self, inp, min_var= 0.001):
+    def __init__(self, inp, min_var= 0.01):
         """
         Helper class for interpreting a flattened Gaussian mixture. This class is meant to more or less mimick the functionality of torch.distributions.normal
         for Gaussian mixtures.
