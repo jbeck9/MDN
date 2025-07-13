@@ -36,7 +36,7 @@ def choice(w, nsamples):
     return (r < w_tot).long().argmax(dim=-1)
 
 class MdnLinear(nn.Module):
-    def __init__(self, input_size, nhidden, nmix, drop_rate= 0.0, layers=1):
+    def __init__(self, input_size, nhidden, nmix, layers=1):
         """
         Adds the MDN Layer. For simple networks such as the hyperbola demo, this can be the entire model.
         Can also be the last layer of a more complex model.
@@ -60,11 +60,14 @@ class MdnLinear(nn.Module):
         
         self.nmix= nmix
         
-        net= [nn.Linear(input_size, nhidden), nn.LeakyReLU(0.1)]
-        for _ in range(layers):
-            net.extend([nn.Linear(nhidden, nhidden), nn.LeakyReLU(0.1), nn.Dropout(drop_rate)])
-        net.extend([nn.Linear(nhidden, nhidden)])
-        self.embed= nn.Sequential(*net)
+        if layers > 0:
+            net= [nn.Linear(input_size, nhidden), nn.GELU()]
+            for _ in range(layers - 1):
+                net.extend([nn.Linear(nhidden, nhidden), nn.GELU()])
+            self.embed= nn.Sequential(*net)
+        else:
+            self.embed= nn.Identity()
+            nhidden= input_size
         
         self.lin_pi= nn.Sequential(nn.Linear(nhidden, nmix), nn.Softmax(dim=-1))
         self.lin_mean= nn.Linear(nhidden, nmix)
@@ -75,12 +78,12 @@ class MdnLinear(nn.Module):
         
         pi= self.lin_pi(x).unsqueeze(1)
         mean= self.lin_mean(x).unsqueeze(1)
-        var= self.lin_var(x).unsqueeze(1) + 1e-6
+        var= self.lin_var(x).unsqueeze(1) + 1e-4
         
         return cat([pi, mean, var], dim=1).permute(0,2,1).flatten(1)
 
 class GaussianMix():
-    def __init__(self, inp, min_var= 0.01):
+    def __init__(self, inp, min_var= 0.1):
         """
         Helper class for interpreting a flattened Gaussian mixture. This class is meant to more or less mimick the functionality of torch.distributions.normal
         for Gaussian mixtures.
@@ -108,6 +111,10 @@ class GaussianMix():
         self.mean= i[:,:,1]
         self.var= i[:,:,2]
         
+        # print(inp.flatten())
+        assert(not self.var.isnan().any())
+        assert(not (self.var == -2).any())
+        
         self.device= inp.device
         
     def reshape_output(self, out, feature_size):
@@ -128,6 +135,8 @@ class GaussianMix():
         return pi, mean, var
         
     def sample(self, nsamples= 1):
+        # adj_var= torch.clone(self.var)
+        # adj_var[adj_var < self.min_var] = 0.0001
         std= self.var.sqrt()
         
         ind= choice(self.pi, nsamples)
@@ -151,8 +160,7 @@ class GaussianMix():
         
         pi, mean, var= self.reshape_mixture(target.shape)
         
-        adj_var= torch.clone(var)
-        adj_var[adj_var < self.min_var] = self.min_var
+        adj_var= torch.clamp(var, min= self.min_var)
         
         std= adj_var.sqrt()
         
