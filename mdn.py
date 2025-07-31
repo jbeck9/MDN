@@ -11,6 +11,10 @@ LL_CONST= math.log(math.sqrt(2 * math.pi))
 cat= torch.cat
 
 relu= nn.functional.relu
+
+def temp_softmax(logits, dim=-1, temp=1.0):
+    return (logits / temp).softmax(dim=dim)
+
 def choice(w, nsamples):
     """
     Pytorch implementation of Numpy's np.random.choice method. Higher speed than
@@ -27,16 +31,17 @@ def choice(w, nsamples):
 
     """
     device= w.device
-    w_tot= torch.zeros(w.shape, device= device)
-    for n in range(w.shape[1]):
-        w_tot[:,n] = w[:,:n+1].sum(dim=-1)
+    w_tot= torch.cumsum(w, dim=1)
+    # w_tot= torch.zeros(w.shape, device= device)
+    # for n in range(w.shape[1]):
+    #     w_tot[:,n] = w[:,:n+1].sum(dim=-1)
         
-    w_tot= w_tot.unsqueeze(1).tile([1, nsamples, 1])
+    w_tot= w_tot.unsqueeze(1).expand(-1, nsamples, -1)
     r= torch.rand([w_tot.shape[0],w_tot.shape[1], 1], device=device)
     return (r < w_tot).long().argmax(dim=-1)
 
 class MdnLinear(nn.Module):
-    def __init__(self, input_size, nhidden, nmix, layers=1):
+    def __init__(self, input_size, nhidden, nmix, layers=1, drop_rate= 0.0):
         """
         Adds the MDN Layer. For simple networks such as the hyperbola demo, this can be the entire model.
         Can also be the last layer of a more complex model.
@@ -61,22 +66,22 @@ class MdnLinear(nn.Module):
         self.nmix= nmix
         
         if layers > 0:
-            net= [nn.Linear(input_size, nhidden), nn.GELU()]
+            net= [nn.Linear(input_size, nhidden), nn.Dropout1d(drop_rate), nn.GELU()]
             for _ in range(layers - 1):
-                net.extend([nn.Linear(nhidden, nhidden), nn.GELU()])
+                net.extend([nn.Linear(nhidden, nhidden), nn.Dropout1d(drop_rate), nn.GELU()])
             self.embed= nn.Sequential(*net)
         else:
             self.embed= nn.Identity()
             nhidden= input_size
         
-        self.lin_pi= nn.Sequential(nn.Linear(nhidden, nmix), nn.Softmax(dim=-1))
+        self.lin_pi= nn.Sequential(nn.Linear(nhidden, nmix))
         self.lin_mean= nn.Linear(nhidden, nmix)
         self.lin_var= nn.Sequential(nn.Linear(nhidden, nmix), nn.Softplus())
         
     def forward(self, x):
         x= self.embed(x)
         
-        pi= self.lin_pi(x).unsqueeze(1)
+        pi= temp_softmax(self.lin_pi(x).unsqueeze(1), temp=10, dim=-1)
         mean= self.lin_mean(x).unsqueeze(1)
         var= self.lin_var(x).unsqueeze(1) + 1e-4
         
@@ -139,6 +144,9 @@ class GaussianMix():
         # adj_var[adj_var < self.min_var] = 0.0001
         std= self.var.sqrt()
         
+        # print(self.pi[0])
+        # print(self.mean[0])
+        # input()
         ind= choice(self.pi, nsamples)
         
         m= torch.gather(self.mean, 1, ind)
