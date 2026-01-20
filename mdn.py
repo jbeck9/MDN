@@ -78,13 +78,20 @@ class MdnLinear(nn.Module):
         self.lin_mean= nn.Linear(nhidden, nmix)
         self.lin_var= nn.Sequential(nn.Linear(nhidden, nmix), nn.Softplus())
         
-    def forward(self, x):
+    def forward(self, x, temp= 5):
         x= self.embed(x)
         
-        pi= temp_softmax(self.lin_pi(x).unsqueeze(1), temp=10, dim=-1)
-        mean= self.lin_mean(x).unsqueeze(1)
-        var= self.lin_var(x).unsqueeze(1) + 1e-4
+        pi= temp_softmax(self.lin_pi(x), temp=temp, dim=-1)
         
+        mean= self.lin_mean(x)
+        # mean[:,0] = 0
+        
+        var= 10*self.lin_var(x) + 1e-4
+        # var[:,0] = 1e-4
+        
+        pi= pi.unsqueeze(1)
+        mean= mean.unsqueeze(1)
+        var= var.unsqueeze(1)
         return cat([pi, mean, var], dim=1).permute(0,2,1).flatten(1)
 
 class GaussianMix():
@@ -144,10 +151,10 @@ class GaussianMix():
         # adj_var[adj_var < self.min_var] = 0.0001
         std= self.var.sqrt()
         
-        # print(self.pi[0])
-        # print(self.mean[0])
-        # input()
-        ind= choice(self.pi, nsamples)
+        pi= torch.clone(self.pi)
+        # pi[pi < 0.02] = 0
+        
+        ind= choice(pi, nsamples)
         
         m= torch.gather(self.mean, 1, ind)
         s= torch.gather(std, 1, ind)
@@ -160,9 +167,19 @@ class GaussianMix():
             
         return self.reshape_output(cdf, 1)
     
-    def expectation(self, use_var= False):
-        out= (self.pi * self.mean).sum(dim=1)
-        return self.reshape_output(out, 1)
+    def expectation(self, return_var=False):
+        m = (self.pi * self.mean).sum(dim=1)
+        
+        if return_var:
+            within_var = (self.pi * self.var).sum(dim=1)
+            
+            # Need to unsqueeze m to [batch_size, 1] for proper broadcasting
+            between_var = (self.pi * torch.square(self.mean - m.unsqueeze(1))).sum(dim=1)
+            var = within_var + between_var
+            
+            return self.reshape_output(m, 1), self.reshape_output(var, 1)
+        else:
+            return self.reshape_output(m, 1)
     
     def loss(self, target):
         
@@ -172,10 +189,11 @@ class GaussianMix():
         
         std= adj_var.sqrt()
         
-        log_p_approx = torch.log(pi) -torch.square(target - mean) / (2 * adj_var) - torch.log(std) - LL_CONST
+        log_p_approx = torch.log(pi) - torch.square(target - mean) / (2 * adj_var) - torch.log(std) - LL_CONST
         loglik= torch.logsumexp(log_p_approx, dim=1)
         
-        return -loglik
+        loss= -loglik
+        return torch.nan_to_num(loss, nan=50, posinf= 50, neginf= -5)
         
     
     def log_prob(self, target):
