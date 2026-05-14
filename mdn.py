@@ -83,6 +83,9 @@ class MdnLinear(nn.Module):
         
         pi= temp_softmax(self.lin_pi(x), temp=temp, dim=-1)
         
+        # min_weight = 0.01  # hard floor per mixture
+        # pi = min_weight + (1 - self.nmix * min_weight) * temp_softmax(self.lin_pi(x), temp= temp, dim=-1)
+        
         mean= self.lin_mean(x)
         # mean[:,0] = 0
         
@@ -181,7 +184,7 @@ class GaussianMix():
         else:
             return self.reshape_output(m, 1)
     
-    def loss(self, target):
+    def nll_loss(self, target):
         
         pi, mean, var= self.reshape_mixture(target.shape)
         
@@ -194,7 +197,11 @@ class GaussianMix():
         
         loss= -loglik
         return torch.nan_to_num(loss, nan=50, posinf= 50, neginf= -5)
+    
+    def low_entropy_loss(self, target_shape):
         
+        pi, mean, var= self.reshape_mixture(target_shape)
+        return (pi * torch.log(pi)).sum(dim=-1)
     
     def log_prob(self, target):
         
