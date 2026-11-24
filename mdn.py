@@ -13,7 +13,8 @@ cat= torch.cat
 relu= nn.functional.relu
 
 def temp_softmax(logits, dim=-1, temp=1.0):
-    return (logits / temp).softmax(dim=dim)
+    probs = (logits / temp).softmax(dim=dim)
+    return probs
 
 def choice(w, nsamples):
     """
@@ -74,11 +75,11 @@ class MdnLinear(nn.Module):
             self.embed= nn.Identity()
             nhidden= input_size
         
-        self.lin_pi= nn.Sequential(nn.Linear(nhidden, nmix))
+        self.lin_pi= nn.Linear(nhidden, nmix)
         self.lin_mean= nn.Linear(nhidden, nmix)
         self.lin_var= nn.Sequential(nn.Linear(nhidden, nmix), nn.Softplus())
         
-    def forward(self, x, temp= 5):
+    def forward(self, x, temp= 1.0):
         x= self.embed(x)
         
         pi= temp_softmax(self.lin_pi(x), temp=temp, dim=-1)
@@ -98,7 +99,7 @@ class MdnLinear(nn.Module):
         return cat([pi, mean, var], dim=1).permute(0,2,1).flatten(1)
 
 class GaussianMix():
-    def __init__(self, inp, min_var= 0.1):
+    def __init__(self, inp, min_var= 0.1, min_pi= 0.0001):
         """
         Helper class for interpreting a flattened Gaussian mixture. This class is meant to more or less mimick the functionality of torch.distributions.normal
         for Gaussian mixtures.
@@ -115,6 +116,7 @@ class GaussianMix():
         """
         
         self.min_var= min_var
+        self.min_pi= min_pi
         
         self.ogshape= list(inp.shape)
         self.bs= inp.flatten(0, -2).shape[0]
@@ -123,6 +125,9 @@ class GaussianMix():
         self.N= i.shape[1]
         
         self.pi= i[:,:,0]
+        # self.pi = self.pi * (self.pi >= self.min_pi)
+        # self.pi = self.pi / self.pi.sum(dim=-1, keepdim=True)
+        
         self.mean= i[:,:,1]
         self.var= i[:,:,2]
         
@@ -155,7 +160,9 @@ class GaussianMix():
         std= self.var.sqrt()
         
         pi= torch.clone(self.pi)
-        # pi[pi < 0.02] = 0
+        # pi = pi * (pi >= self.min_pi)
+        # pi = pi / pi.sum(dim=-1, keepdim=True)
+        # print(float(pi[0].min()))
         
         ind= choice(pi, nsamples)
         
@@ -184,15 +191,18 @@ class GaussianMix():
         else:
             return self.reshape_output(m, 1)
     
-    def nll_loss(self, target):
+    def nll_loss(self, target_mean, target_var= None):
         
-        pi, mean, var= self.reshape_mixture(target.shape)
+        if target_var is None:
+            target_var = torch.zeros_like(target_mean)
+        
+        pi, mean, var= self.reshape_mixture(target_mean.shape)
         
         adj_var= torch.clamp(var, min= self.min_var)
         
         std= adj_var.sqrt()
         
-        log_p_approx = torch.log(pi) - torch.square(target - mean) / (2 * adj_var) - torch.log(std) - LL_CONST
+        log_p_approx = torch.log(pi) - (torch.square(target_mean - mean) + target_var) / (2 * adj_var) - torch.log(std) - LL_CONST
         loglik= torch.logsumexp(log_p_approx, dim=1)
         
         loss= -loglik
